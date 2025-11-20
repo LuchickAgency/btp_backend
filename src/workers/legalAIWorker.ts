@@ -10,36 +10,34 @@ const BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
 // @ts-ignore
 const fetchAny: any = fetch;
 
-// Appelle DeepSeek
 async function deepseekSummarize(content: string, link: string) {
   const response = await fetchAny(`${BASE_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${API_KEY}`,
     },
     body: JSON.stringify({
       model: "deepseek-chat",
       messages: [
         {
           role: "system",
-          content: "Tu es un assistant juridique spécialisé BTP. Résume simplement les textes de loi."
+          content:
+            "Tu es un assistant juridique spécialisé BTP. Résume simplement les textes de loi.",
         },
         {
           role: "user",
-          content:
-            `Voici un texte légal. Résume-le clairement pour un professionnel du BTP réunionnais.
-            
-            Inclure OBLIGATOIREMENT :
-            - un résumé en 5 points simples
-            - les obligations majeures
-            - la date si présente
-            - un encadré “Aller à la source” avec le lien suivant : ${link}
+          content: `Voici un texte légal. Résume-le clairement pour un professionnel du BTP réunionnais.
 
-            Texte :
-            ${content}
-            `
-        }
+- Résumé en 5 points
+- Obligations majeures
+- Date si présente
+- Encadré “Aller à la source”: ${link}
+
+Texte :
+${content}
+`,
+        },
       ],
       temperature: 0.3,
     }),
@@ -79,7 +77,7 @@ export async function runLegalAIWorker() {
         })
         .where(eq(legalArticles.id, article.id));
 
-      console.log(`✔ Article ${article.id} résumé et mis à jour.`);
+      console.log(`✔ Article ${article.id} résumé.`);
     }
   } catch (error) {
     console.error("❌ Worker IA erreur :", error);

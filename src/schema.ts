@@ -254,7 +254,7 @@ export const legalArticles = pgTable("legal_articles", {
 
   title: varchar("title", { length: 500 }),
 
-  body: text("body"),                        // <-- AJOUT ICI
+  body: text("body"),
 
   rawContent: text("raw_content"),
   source: varchar("source", { length: 50 }),
@@ -270,9 +270,6 @@ export const legalArticles = pgTable("legal_articles", {
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
-
-
-
 
 /* --------------------------------------------------
    LEGAL ARTICLE TAGS
@@ -328,6 +325,110 @@ export const companyAdminRequests = pgTable("company_admin_requests", {
 
   token: varchar("token", { length: 255 }).notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+/* --------------------------------------------------
+   MEDIA ASSETS (images / vidéos, réutilisables partout)
+-------------------------------------------------- */
+export const mediaAssets = pgTable("media_assets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  ownerId: uuid("owner_id").notNull(),
+  url: text("url").notNull(),
+
+  type: varchar("type", { length: 20 }).notNull(),
+  // "IMAGE" | "VIDEO" | plus tard "FILE"
+
+  mimeType: varchar("mime_type", { length: 100 }),
+  width: integer("width"),
+  height: integer("height"),
+  sizeBytes: integer("size_bytes"),
+
+  storageProvider: varchar("storage_provider", { length: 50 }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+/* --------------------------------------------------
+   PIVOT CONTENT <-> MEDIA (feed avec images/vidéos)
+-------------------------------------------------- */
+export const contentMedia = pgTable("content_media", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  contentId: uuid("content_id").notNull(),
+  mediaId: uuid("media_id").notNull(),
+
+  // ordre des médias dans le post
+  sortOrder: integer("sort_order").default(0).notNull(),
+
+  // true = image de couverture
+  isCover: boolean("is_cover").default(false).notNull(),
+});
+
+
+
+/* --------------------------------------------------
+   CONVERSATIONS (DM ou groupes)
+-------------------------------------------------- */
+export const conversations = pgTable("conversations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  type: varchar("type", { length: 20 }).notNull(),
+  // "DIRECT" | "GROUP"
+
+  createdBy: uuid("created_by").notNull(),
+  title: varchar("title", { length: 255 }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+/* --------------------------------------------------
+   PARTICIPANTS D'UNE CONVERSATION
+-------------------------------------------------- */
+export const conversationParticipants = pgTable("conversation_participants", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  conversationId: uuid("conversation_id").notNull(),
+  userId: uuid("user_id").notNull(),
+
+  role: varchar("role", { length: 20 }).default("MEMBER").notNull(),
+
+  joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
+
+  lastReadMessageId: uuid("last_read_message_id"),
+});
+
+/* --------------------------------------------------
+   MESSAGES DE CONVERSATION
+-------------------------------------------------- */
+export const conversationMessages = pgTable("conversation_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  conversationId: uuid("conversation_id").notNull(),
+  senderId: uuid("sender_id").notNull(),
+
+  body: text("body"),
+
+  messageType: varchar("message_type", { length: 20 })
+    .default("TEXT")
+    .notNull(),
+  // "TEXT" | "MEDIA" | plus tard "SYSTEM"
+
+  replyToMessageId: uuid("reply_to_message_id"),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+/* --------------------------------------------------
+   LIEN MESSAGE <-> MEDIA
+-------------------------------------------------- */
+export const messageAttachments = pgTable("message_attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  messageId: uuid("message_id").notNull(),
+  mediaId: uuid("media_id").notNull(),
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

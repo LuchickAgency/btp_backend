@@ -5,6 +5,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/requireAuth";
 import crypto from "crypto";
 import { z } from "zod";
+import { sql } from "drizzle-orm/sql"; // IMPORTANT : version qui marche chez toi
 
 const router = Router();
 
@@ -33,7 +34,7 @@ async function isSuperAdmin(userId: string): Promise<boolean> {
 
 /* ---------------------------------------------------------
    POST /legal-articles
-   Création manuelle (pour tests ou contenus internes)
+   Création manuelle (SUPER ADMIN)
 --------------------------------------------------------- */
 router.post("/", requireAuth, async (req, res) => {
   try {
@@ -52,7 +53,6 @@ router.post("/", requireAuth, async (req, res) => {
     }
 
     const { title, body, tags = [] } = parsed.data;
-
     const id = crypto.randomUUID();
 
     const [article] = await db
@@ -95,7 +95,7 @@ router.post("/", requireAuth, async (req, res) => {
 
 /* ---------------------------------------------------------
    GET /legal-articles
-   Liste + pagination + tag filtering
+   LISTE + TAG FILTER + PAGINATION
 --------------------------------------------------------- */
 router.get("/", async (req, res) => {
   try {
@@ -108,18 +108,15 @@ router.get("/", async (req, res) => {
     if (pageSize > 100) pageSize = 100;
 
     const offset = (page - 1) * pageSize;
-
     let articles;
 
     if (tagFilter) {
-      // find articles matching tag
       const tagRows = await db
         .select()
         .from(legalArticleTags)
         .where(eq(legalArticleTags.tag, tagFilter));
 
       const ids = tagRows.map((t) => t.articleId);
-
       if (ids.length === 0) return res.json([]);
 
       articles = await db
@@ -130,7 +127,6 @@ router.get("/", async (req, res) => {
         .limit(pageSize)
         .offset(offset);
     } else {
-      // no tag filtering
       articles = await db
         .select()
         .from(legalArticles)
@@ -139,18 +135,13 @@ router.get("/", async (req, res) => {
         .offset(offset);
     }
 
-    // attach tags for each
     const withTags = await Promise.all(
       articles.map(async (a) => {
         const tagRows = await db
           .select()
           .from(legalArticleTags)
           .where(eq(legalArticleTags.articleId, a.id));
-
-        return {
-          ...a,
-          tags: tagRows.map((t) => t.tag),
-        };
+        return { ...a, tags: tagRows.map((t) => t.tag) };
       })
     );
 
@@ -162,8 +153,119 @@ router.get("/", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
+   GET /legal-articles/search
+   FULL TEXT SEARCH (public)
+   !!! IMPORTANT : AVANT /:id
+--------------------------------------------------------- */
+router.get("/search", async (req, res) => {
+  try {
+    const q = (req.query.q as string | undefined)?.trim() || "";
+    const page = parseInt((req.query.page as string) || "1", 10);
+    const pageSize = parseInt((req.query.pageSize as string) || "10", 10);
+
+    if (!q) return res.status(400).json({ error: "MISSING_QUERY" });
+
+    const offset = (page - 1) * pageSize;
+    const like = `%${q}%`;
+
+    const articles = await db
+      .select()
+      .from(legalArticles)
+      .where(
+        sql`${legalArticles.title} ILIKE ${like} OR ${legalArticles.body} ILIKE ${like}`
+      )
+      .orderBy(desc(legalArticles.createdAt))
+      .limit(pageSize)
+      .offset(offset);
+
+    const withTags = await Promise.all(
+      articles.map(async (a) => {
+        const tags = await db
+          .select()
+          .from(legalArticleTags)
+          .where(eq(legalArticleTags.articleId, a.id));
+
+        return { ...a, tags: tags.map((t) => t.tag) };
+      })
+    );
+
+    res.json({
+      page,
+      pageSize,
+      items: withTags,
+    });
+  } catch (err) {
+    console.error("SEARCH ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ---------------------------------------------------------
+   GET /legal-articles/latest
+   DERNIERS ARTICLES (public)
+--------------------------------------------------------- */
+router.get("/latest", async (req, res) => {
+  try {
+    const limit = parseInt((req.query.limit as string) || "5", 10);
+
+    const articles = await db
+      .select()
+      .from(legalArticles)
+      .orderBy(desc(legalArticles.createdAt))
+      .limit(limit);
+
+    const withTags = await Promise.all(
+      articles.map(async (a) => {
+        const tags = await db
+          .select()
+          .from(legalArticleTags)
+          .where(eq(legalArticleTags.articleId, a.id));
+
+        return { ...a, tags: tags.map((t) => t.tag) };
+      })
+    );
+
+    res.json(withTags);
+  } catch (err) {
+    console.error("LATEST ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ---------------------------------------------------------
+   GET /legal-articles/ai-status
+   PIPELINE IA (Super Admin)
+--------------------------------------------------------- */
+router.get("/ai-status", requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+
+    if (!(await isSuperAdmin(userId))) {
+      return res.status(403).json({ error: "NOT_ALLOWED" });
+    }
+
+    const rows = await db.select().from(legalArticles);
+
+    const byStatus: Record<string, number> = {};
+    for (const r of rows) {
+      const status = (r as any).status || "UNKNOWN";
+      byStatus[status] = (byStatus[status] || 0) + 1;
+    }
+
+    res.json({
+      total: rows.length,
+      byStatus,
+    });
+  } catch (err) {
+    console.error("AI STATUS ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ---------------------------------------------------------
    GET /legal-articles/:id
-   Détail complet
+   DETAILS (public)
+   !!! PLACÉ À LA FIN
 --------------------------------------------------------- */
 router.get("/:id", async (req, res) => {
   try {
@@ -174,26 +276,22 @@ router.get("/:id", async (req, res) => {
       .from(legalArticles)
       .where(eq(legalArticles.id, id));
 
-    if (!article) return res.status(404).json({ error: "Article not found" });
+    if (!article) return res.status(404).json({ error: "NOT_FOUND" });
 
     const tags = await db
       .select()
       .from(legalArticleTags)
       .where(eq(legalArticleTags.articleId, id));
 
-    res.json({
-      ...article,
-      tags: tags.map((t) => t.tag),
-    });
+    res.json({ ...article, tags: tags.map((t) => t.tag) });
   } catch (err) {
-    console.error("GET LEGAL ARTICLE ERROR:", err);
+    console.error("GET ARTICLE ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
 /* ---------------------------------------------------------
    PATCH /legal-articles/:id
-   Mise à jour manuelle
 --------------------------------------------------------- */
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
@@ -227,7 +325,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
       .where(eq(legalArticles.id, id))
       .returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return res.status(404).json({ error: "NOT_FOUND" });
 
     if (tags) {
       await db
@@ -247,13 +345,13 @@ router.patch("/:id", requireAuth, async (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    console.error("UPDATE LEGAL ARTICLE ERROR:", err);
+    console.error("PATCH ERROR:", err);
     res.status(500).json({ error: "Update failed" });
   }
 });
 
 /* ---------------------------------------------------------
-   DELETE ARTICLE (Super Admin)
+   DELETE /legal-articles/:id
 --------------------------------------------------------- */
 router.delete("/:id", requireAuth, async (req, res) => {
   try {
@@ -272,7 +370,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
 
     res.json({ message: "Deleted" });
   } catch (err) {
-    console.error("DELETE LEGAL ARTICLE ERROR:", err);
+    console.error("DELETE ERROR:", err);
     res.status(500).json({ error: "Delete failed" });
   }
 });
